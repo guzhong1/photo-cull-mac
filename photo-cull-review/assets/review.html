@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>照片审核</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#11181d;color:#eaf0f2;font:15px/1.6 system-ui,"PingFang SC","Microsoft YaHei",sans-serif}header{padding:26px 4vw 16px;border-bottom:1px solid #36444c}h1{margin:0;font-size:27px}header p{color:#afc0c8;margin:8px 0}.controls{padding:16px 4vw;display:flex;gap:10px;flex-wrap:wrap;align-items:center;background:#1b252c;position:sticky;top:0;z-index:3}input,select,button{font:inherit;border:1px solid #52636d;border-radius:6px;padding:9px 12px;background:#26343d;color:#fff}button{cursor:pointer}button:hover{background:#35525b}#search{width:200px;max-width:100%}#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(265px,1fr));gap:18px;padding:22px 4vw}article{background:#1c282f;border:1px solid #3d4c54;border-radius:8px;overflow:hidden}article.chosen{border:2px solid #70d1be}article img{width:100%;height:230px;object-fit:contain;background:#0a1014;display:block}.detail{height:180px!important}.open{display:block;width:100%;border:0;padding:0;border-radius:0}.meta{padding:14px}.file{overflow-wrap:anywhere;font-weight:650}.muted{color:#a6bbc5;font-size:13px;overflow-wrap:anywhere}.reason{font-size:14px;margin:8px 0;color:#d2e1e5}label.pick{display:flex;align-items:center;gap:10px;padding-top:10px}input[type=checkbox]{width:20px;height:20px;accent-color:#64b9aa}#count,#storage{margin:10px 4vw;color:#bed0d8}#storage{font-size:13px}dialog{width:95vw;max-width:1400px;height:94vh;background:#10191f;color:white;border:1px solid #647981;padding:15px;border-radius:8px}dialog::backdrop{background:#000c}.large{width:100%;height:65vh;object-fit:contain;display:block}.dialogbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:center}.dialogname{text-align:center;overflow-wrap:anywhere;margin:10px}#empty{padding:40px;text-align:center;color:#b5c8cf}#toast{color:#f4d28b;margin:10px 4vw;overflow-wrap:anywhere}@media(max-width:520px){.controls{position:static;padding:12px;gap:8px}.controls button,.controls select{font-size:13px;padding:8px}#grid{padding:12px;grid-template-columns:1fr}.large{height:58vh}header{padding:20px 14px}h1{font-size:23px}}@media print{.controls,dialog{display:none}body{background:white;color:black}#grid{display:block}article{break-inside:avoid;margin-bottom:12px}}
+</style></head><body>
+<header><h1 id="title"></h1><p>先看完整构图，再比较关键细节。勾选只记录本轮选择，不会删除或复制原片。</p><p>这里是缩小预览；精细锐度与色彩须核对源文件。人物照片和文件名仍是私人素材。</p></header>
+<div class="controls"><select id="status" aria-label="状态筛选"><option value="all">全部照片</option><option value="priority">优先看</option><option value="candidate">其他候选</option><option value="defer">待复核</option><option value="unreviewed">未审阅</option><option value="exclude">本轮不选</option><option value="selected">我已勾选</option></select><select id="group" aria-label="分组"><option value="all">全部分组</option></select><input id="search" placeholder="搜索完整文件名或路径" aria-label="搜索"><button id="export">导出选择 JSON</button><button id="import">导入选择</button><input hidden type="file" id="importfile" accept="application/json,.json"><button id="clear">清空勾选</button></div>
+<p id="count"></p><p id="storage"></p><p id="toast" role="status"></p><main id="grid"></main><div id="empty" hidden>没有符合条件的照片；可以调整筛选。</div>
+<dialog id="viewer"><div class="dialogbar"><button id="prev">上一张</button><button id="next">下一张</button><button id="toggle">勾选 / 取消</button><button id="close">关闭</button></div><div class="dialogname" id="dialogname"></div><img class="large" id="large" alt="完整构图放大预览"><p class="dialogname" id="dialogreason"></p></dialog>
+<script>
+'use strict';
+const DATA=__DATA__;
+const labels={unreviewed:'未审阅',priority:'优先看',candidate:'其他候选',defer:'待复核',exclude:'本轮不选'};
+const byId=new Map(DATA.photos.map(p=>[p.id,p]));
+const key='photo-cull-v1:'+DATA.project_id;
+let selected=new Set(),visible=[],current=-1,storageOK=true;
+const $=id=>document.getElementById(id);
+try{const ids=JSON.parse(localStorage.getItem(key)||'[]');if(Array.isArray(ids))selected=new Set(ids.filter(id=>byId.has(id)));}catch(e){storageOK=false;}
+$('title').textContent=DATA.title;document.title=DATA.title;
+for(const g of [...new Set(DATA.photos.map(p=>p.group))]){const o=document.createElement('option');o.value=g;o.textContent=g;$('group').append(o);}
+function notice(s){$('toast').textContent=s;}
+function save(){try{localStorage.setItem(key,JSON.stringify([...selected]));}catch(e){storageOK=false;}storage();}
+function storage(){$('storage').textContent=storageOK?'勾选尝试保存在当前浏览器。请导出JSON备份；换浏览器或电脑不会自动同步。':'此环境无法保存浏览器状态；请在关闭前导出JSON，之后可导入恢复。';}
+function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e;}
+function toggle(id){if(selected.has(id))selected.delete(id);else selected.add(id);save();draw();if($('viewer').open)showCurrent();}
+function draw(){
+ const state=$('status').value,group=$('group').value,term=$('search').value.toLowerCase();
+ visible=DATA.photos.filter(p=>(state==='all'||(state==='selected'?selected.has(p.id):p.status===state))&&(group==='all'||p.group===group)&&p.relative.toLowerCase().includes(term));
+ $('grid').replaceChildren();
+ for(const p of visible){
+  const a=el('article',selected.has(p.id)?'chosen':'');a.dataset.id=p.id;
+  if(p.detail){const detail=el('img','detail');detail.src=p.detail;detail.alt='经人工核对的局部预览：'+p.relative;detail.loading='lazy';a.append(detail);}
+  const open=el('button','open');open.setAttribute('aria-label','放大 '+p.relative);const im=el('img');im.src=p.preview;im.alt=p.relative;im.loading='lazy';open.append(im);open.onclick=()=>openAt(p.id);a.append(open);
+  const m=el('div','meta');m.append(el('div','file',p.relative),el('div','muted',labels[p.status]+' · '+p.group+' · '+p.width+'×'+p.height),el('div','reason',p.reason));
+  const l=el('label','pick');const check=el('input');check.type='checkbox';check.checked=selected.has(p.id);check.setAttribute('aria-label','选择 '+p.relative);check.onchange=()=>toggle(p.id);l.append(check,document.createTextNode('本轮保留'));m.append(l);a.append(m);$('grid').append(a);
+ }
+ $('count').textContent='显示 '+visible.length+' / '+DATA.photos.length+' 张；已勾选 '+selected.size+' 张。另有 '+DATA.unread_count+' 个未处理文件，请查看工程清单。';$('empty').hidden=visible.length>0;
+}
+let dialogIds=[];
+function openAt(id){dialogIds=visible.map(p=>p.id);current=dialogIds.indexOf(id);showCurrent();$('viewer').showModal();}
+function showCurrent(){const p=byId.get(dialogIds[current]);if(!p)return;$('large').src=p.preview;$('dialogname').textContent=p.relative+' · '+(selected.has(p.id)?'已勾选':'未勾选');$('dialogreason').textContent=p.reason;$('toggle').textContent=selected.has(p.id)?'取消本轮保留':'本轮保留';$('prev').disabled=current<=0;$('next').disabled=current>=dialogIds.length-1;}
+function step(n){current=Math.max(0,Math.min(dialogIds.length-1,current+n));showCurrent();}
+$('prev').onclick=()=>step(-1);$('next').onclick=()=>step(1);$('toggle').onclick=()=>toggle(dialogIds[current]);$('close').onclick=()=>$('viewer').close();
+document.addEventListener('keydown',e=>{if(!$('viewer').open)return;if(e.key==='ArrowLeft'){e.preventDefault();step(-1);}if(e.key==='ArrowRight'){e.preventDefault();step(1);}});
+for(const id of ['status','group'])$(id).onchange=draw;$('search').oninput=draw;
+$('export').onclick=()=>{
+ const data={version:1,project_id:DATA.project_id,meaning:'仅为本轮勾选，最终用途由用户说明',selected:DATA.photos.filter(p=>selected.has(p.id)).map(p=>({id:p.id,relative:p.relative,sha256:p.sha256}))};
+ const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='选片名单_'+DATA.project_id+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);notice('已导出 '+data.selected.length+' 张的名单。网页没有复制或删除磁盘照片。');
+};
+$('clear').onclick=()=>{if(confirm('仅清空这个项目的网页勾选，原照片不受影响。继续吗？')){selected.clear();save();draw();}};
+$('import').onclick=()=>$('importfile').click();
+$('importfile').onchange=async()=>{
+ const file=$('importfile').files[0];if(!file)return;
+ try{const d=JSON.parse(await file.text());if(d.project_id!==DATA.project_id||!Array.isArray(d.selected))throw Error('项目不匹配或名单格式错误');
+  const ids=new Set();for(const e of d.selected){if(!e||typeof e!=='object')throw Error('名单条目无效');const p=byId.get(e.id);if(!p||p.relative!==e.relative||p.sha256!==e.sha256||ids.has(e.id))throw Error('文件ID、路径或校验不匹配');ids.add(e.id);}
+  if(confirm('用导入名单替换当前网页的勾选吗？原照片不受影响。')){selected=ids;save();draw();notice('导入完成，共 '+selected.size+' 张。');}
+ }catch(e){notice('未导入：'+e.message);}finally{$('importfile').value='';}
+};storage();draw();
+</script></body></html>

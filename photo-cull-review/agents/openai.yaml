@@ -1,0 +1,4 @@
+interface:
+  display_name: "照片筛选"
+  short_description: "先防漏初筛再比较相邻照片，生成本地选片页、确认名单与独立副本"
+  default_prompt: "请使用 $photo-cull-review，按我的用途筛选照片，保留原片并交付可复选的本地结果。"
